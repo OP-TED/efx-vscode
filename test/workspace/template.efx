@@ -1,0 +1,4 @@
+// A view template, which the tests open to check that VS Code reads .efx files as EFX.
+--- MAIN ---
+1 WITH ND-Root DISPLAY #{auxiliary|text|procedure}; // Procedure
+	WITH BT-21-Procedure DISPLAY #{field|name|BT-21-Procedure}: ${BT-21-Procedure};

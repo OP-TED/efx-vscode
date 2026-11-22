@@ -1,0 +1,70 @@
+name: Build
+
+# Builds the .vsix of every commit pushed, tests it inside VS Code and keeps it with the run. On a tag
+# of the form x.y.z, it then attaches that .vsix to a GitHub release of the tag, with CHANGELOG.md as
+# the release notes. The tag does not set the version: tag the commit that sets it in package.json,
+# with the same number.
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '*.*.*'
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.14.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npm test packages the .vsix first, and VS Code needs a display to run in.
+      - name: Package and test the extension
+        run: xvfb-run -a npm test
+
+      - name: Keep the .vsix
+        uses: actions/upload-artifact@v7
+        with:
+          name: vsix
+          path: '*.vsix'
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check that the tag is the version in package.json
+        run: test "$GITHUB_REF_NAME" = "$(node -p "require('./package.json').version")"
+
+      - name: Get the .vsix
+        uses: actions/download-artifact@v8
+        with:
+          name: vsix
+
+      - name: Attach the .vsix to a release of the tag
+        run: gh release create "$GITHUB_REF_NAME" *.vsix --verify-tag --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
