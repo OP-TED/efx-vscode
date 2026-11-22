@@ -1,0 +1,7 @@
+node_modules/
+dist/
+out/
+*.vsix
+
+# The VS Code that npm test downloads and runs the tests in, with its settings and extensions.
+.vscode-test/

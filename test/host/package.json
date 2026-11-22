@@ -1,0 +1,10 @@
+{
+  "name": "efx-vscode-test-host",
+  "description": "An extension with nothing in it, which VS Code runs the tests beside, so that the extension under test is the installed .vsix (.vscode-test.mjs).",
+  "version": "0.0.0",
+  "publisher": "op-ted",
+  "private": true,
+  "engines": {
+    "vscode": "^1.101.0"
+  }
+}
