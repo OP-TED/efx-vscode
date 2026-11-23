@@ -9,8 +9,8 @@ import { SemanticTokens } from './SemanticTokens';
 
 const extension = vscode.extensions.getExtension<EfxExtensionApi>('op-ted.efx-vscode');
 
-// A rule, and a rules file of it many times over, about two megabytes, which the parser takes more
-// than a second to read on any machine the tests run on.
+// A rule, and a rules file of it many times over, about two megabytes, which the parser takes a while
+// to read.
 const RULE = 'WITH ND-Root ASSERT BT-01-notice is present AS ERROR R-000-001 FOR BT-01-notice IN *;\n';
 const RULES = `--- STAGE 1a ---\n${RULE}`;
 const LONG_RULES = `--- STAGE 1a ---\n${RULE.repeat(20000)}`;
@@ -25,21 +25,16 @@ const EFX1_TEXT = '{ND-Root} ${BT-01-notice}\n';
 // How long a test waits to see that the extension does not change a document's language.
 const SETTLING_TIME = 1000;
 
-// Rules long enough for the worker to be reading them while a test changes what they are read as,
-// and short enough for an editor to show.
-const SHOWN_RULES = `--- STAGE 1a ---\n${RULE.repeat(5000)}`;
-
 // The longest the extension host may stop while the worker reads: this long, or this share of the time
 // the reading takes, if that is longer, as a machine that is busy with other work stops the host now
-// and then on its own. The reading must take long enough for the test to tell: on the host, it would
-// stop the host all that time.
+// and then on its own. A fast machine may read in less time than that, and the check then passes
+// whatever runs where: that the extension host holds no parser at all is checked apart, whatever the
+// speed of the machine (extension.test.ts).
 const HOST_PAUSE = 300;
 const HOST_PAUSE_SHARE = 0.25;
-const READING_TIME = 2 * HOST_PAUSE;
 
-/** Checks that the extension host did not stop for long while a task ran, and that the task took long enough to tell. */
+/** Checks that the extension host did not stop for long while a task ran. */
 function assertHostFree({ longest, took }: { longest: number; took: number }): void {
-  assert.ok(took > READING_TIME, `the task took ${Math.round(took)} ms only, too little to tell`);
   assert.ok(longest < Math.max(HOST_PAUSE, HOST_PAUSE_SHARE * took),
     `the extension host stopped for ${Math.round(longest)} ms of ${Math.round(took)}`);
 }
@@ -59,7 +54,9 @@ async function pausesWhile<T>(task: () => Promise<T>): Promise<{ result: T; long
   const started = performance.now();
   try {
     const result = await task();
-    return { result, longest, took: performance.now() - started };
+    // With the time since the last check, as the host may have stopped just before the task ended.
+    const ended = performance.now();
+    return { result, longest: Math.max(longest, ended - last), took: ended - started };
   } finally {
     clearInterval(timer);
   }
@@ -111,9 +108,15 @@ function tokenReadings(): number {
   return extension.exports.tokenReadings;
 }
 
-/** Waits until the worker has run more requests than given. */
-async function runsAfter(runs: number): Promise<void> {
-  while (tokenReadings() <= runs) {
+/** How many times the extension's worker has read what a document holds: its version of EFX, or its kind of file. */
+function fileReadings(): number {
+  assert.ok(extension?.isActive, 'the extension is not active');
+  return extension.exports.fileReadings;
+}
+
+/** Waits until a count of the worker's requests is more than given. */
+async function runsAfter(runs: number, count: () => number): Promise<void> {
+  while (count() <= runs) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
@@ -131,20 +134,25 @@ suite('The worker', () => {
     assertHostFree(reading);
   });
 
-  test('tells what a file holds, as it opens, without holding up the extension host', async () => {
-    await tokensOf(await documentOf(RULES));
+  // The extension host holds no parser (extension.test.ts): what a file holds is read in the worker.
+  // The test does not time that reading, as inferEfx reads at most about 16,000 characters of a file,
+  // which a fast machine reads in too little time to tell. That the reading as a file opens is of both
+  // versions is checked apart, with a stand-in for the worker (lifecycle.test.ts).
+  test('tells what a file holds in the worker, once, as it opens', async () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'efx-vscode-')), 'ambiguous.efx');
     fs.writeFileSync(file, AMBIGUOUS_RULES);
     try {
-      const telling = await pausesWhile(async () => {
-        const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-        made.push(opened);
-        await tokensOf(opened);
-        return opened;
-      });
-      assert.equal(telling.result.languageId, 'efx');
-      assert.equal((await SemanticTokens.of(telling.result)).at('*'), 'efxWord');
-      assertHostFree(telling);
+      const runs = fileReadings();
+      const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+      made.push(opened);
+      // Opening the file starts the reading in the worker, before anything asks for its tokens.
+      await runsAfter(runs, fileReadings);
+      const tokens = await SemanticTokens.of(opened);
+      assert.equal(opened.languageId, 'efx');
+      assert.equal(tokens.at('*'), 'efxWord');
+      // That reading only, in several rounds, in one request: the tokens are then read as the kind of
+      // file it found, with no reading of the kind again.
+      assert.equal(fileReadings() - runs, 1);
     } finally {
       fs.rmSync(path.dirname(file), { recursive: true, force: true });
     }
@@ -156,27 +164,6 @@ suite('The worker', () => {
     await Promise.all([tokensOf(document), tokensOf(document)]);
     assert.equal((await SemanticTokens.of(document)).at('*'), 'efxWord');
     assert.equal(tokenReadings() - runs, 1);
-  });
-
-  test('reads only the newest version of a document that changes while it reads, and drops the rest', async () => {
-    const document = await documentOf(LONG_RULES);
-    const runs = tokenReadings();
-    const first = tokensOf(document);
-    await runsAfter(runs);
-    const later: Promise<vscode.SemanticTokens | undefined>[] = [];
-    for (let edit = 0; edit < 3; edit += 1) {
-      const change = new vscode.WorkspaceEdit();
-      change.insert(document.uri, new vscode.Position(0, 0), '// A change\n');
-      await vscode.workspace.applyEdit(change);
-      later.push(tokensOf(document));
-    }
-    assert.equal(await first, undefined, 'the answer for the first version is not dropped');
-    const newest = await later[later.length - 1];
-    assert.ok(newest !== undefined && newest.data.length > 0, 'no tokens for the newest version');
-    await Promise.all(later);
-    assert.equal((await SemanticTokens.of(document)).at('*'), 'efxWord');
-    // The first version, which cannot be stopped once it runs, and the newest; none in between.
-    assert.equal(tokenReadings() - runs, 2);
   });
 
   test('keeps a .efx file that opened as EFX-1 in EFX-2, once EFX-2 is chosen for it', async () => {
@@ -195,18 +182,5 @@ suite('The worker', () => {
       await files.update('associations', associations, vscode.ConfigurationTarget.Global);
       fs.rmSync(path.dirname(file), { recursive: true, force: true });
     }
-  });
-
-  test('drops the answer for a kind of file chosen away while it is read', async () => {
-    const document = await documentOf(SHOWN_RULES);
-    const runs = tokenReadings();
-    // Read as Template acts on the active editor.
-    await vscode.window.showTextDocument(document);
-    const asRules = tokensOf(document);
-    await runsAfter(runs);
-    await vscode.commands.executeCommand('efx.readAsTemplate');
-    assert.equal(await asRules, undefined, 'the answer for rules is not dropped');
-    const asTemplate = await tokensOf(document);
-    assert.ok(asTemplate !== undefined && asTemplate.data.length > 0, 'no tokens for the template');
   });
 });

@@ -30,6 +30,9 @@ export class EfxWorker implements vscode.Disposable {
   readonly #runs = new Map<EfxMethod, number>();
   #disposed = false;
 
+  /** start: how a worker thread starts, the extension's own (worker.ts), or a stand-in in its tests. */
+  constructor(private readonly start: () => Worker = () => new Worker(path.join(__dirname, 'worker.js'))) {}
+
   /** How many requests of a method the worker has run, for the extension's tests. */
   runsOf(method: EfxMethod): number {
     return this.#runs.get(method) ?? 0;
@@ -79,7 +82,7 @@ export class EfxWorker implements vscode.Disposable {
   /** The worker, started when a request first needs it, or again after it has failed. */
   #workerToRun(): Worker {
     if (this.#worker === undefined) {
-      const worker = new Worker(path.join(__dirname, 'worker.js'));
+      const worker = this.start();
       worker.on('message', (answer: EfxAnswer) => this.#answer(answer));
       worker.on('error', (error) => this.#failed(worker, error));
       worker.on('exit', (code) => this.#failed(worker, new Error(`The EFX worker stopped (${code})`)));

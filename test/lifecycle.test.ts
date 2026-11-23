@@ -1,13 +1,16 @@
 import * as assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { Worker } from 'node:worker_threads';
 import type { EfxReading } from '@op-ted/efx-syntax-highlighter';
 import * as vscode from 'vscode';
 import { EfxLanguage } from '../src/EfxLanguage';
 import { EfxReadings } from '../src/EfxReadings';
 import { EfxSemanticTokens } from '../src/EfxSemanticTokens';
 import { EfxWorker } from '../src/EfxWorker';
+import type { EfxRequest } from '../src/worker';
 import { EfxFiles } from './EfxFiles';
 
 // The parts of the extension, made apart from the one VS Code runs, with a stand-in for the worker or
@@ -40,6 +43,24 @@ async function askedAbout(asked: Asked[], text: string, count: number): Promise<
       return about;
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** A stand-in for the worker thread that EfxWorker starts, which keeps the requests it is given for the test to answer. */
+class StandInThread extends EventEmitter {
+  readonly requests: EfxRequest[] = [];
+
+  postMessage(request: EfxRequest): void {
+    this.requests.push(request);
+  }
+
+  /** Answers the request given last, which is the one EfxWorker runs. */
+  answer(result: unknown): void {
+    this.emit('message', { id: this.requests[this.requests.length - 1].id, result });
+  }
+
+  terminate(): Promise<number> {
+    return Promise.resolve(0);
   }
 }
 
@@ -120,6 +141,28 @@ suite('What the extension does when things change while it waits', () => {
     }
   });
 
+  test('a .efx file is read once as it opens, in both versions, and its tokens as the kind it holds', async () => {
+    const text = '--- STAGE 1a ---\nWITH ND-Root ASSERT BT-01-notice is present AS ERROR R-000-001 FOR BT-01-notice IN *;\n';
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'efx-vscode-')), 'opened.efx');
+    fs.writeFileSync(file, text);
+    const asked: Asked[] = [];
+    const worker = standInWorker(asked);
+    const readings = new EfxReadings(worker);
+    try {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+      // Opening the file alone asks for its reading.
+      (await askedAbout(asked, text, 1))[0].answer({ version: 2, kind: 'rules' });
+      const tokens = new EfxSemanticTokens(readings, worker).provideDocumentSemanticTokens(document, NOT_CANCELLED);
+      (await askedAbout(asked, text, 2))[1].answer(new Uint32Array(0));
+      await tokens;
+      assert.deepEqual(asked.filter(({ params }) => params.text === text).map(({ method, params }) => [method, params.version, params.reading]),
+        [['reading', undefined, undefined], ['semanticTokens', undefined, { version: 2, kind: 'rules' }]]);
+    } finally {
+      readings.dispose();
+      fs.rmSync(path.dirname(file), { recursive: true, force: true });
+    }
+  });
+
   test('a language chosen for a .efx file while the worker tells what it holds stays', async () => {
     // EFX-2, which the extension that VS Code runs keeps; the stand-in tells EFX-1 once the language is chosen.
     const text = 'WITH ND-Root DISPLAY a file whose language is chosen;\n';
@@ -160,6 +203,72 @@ suite('What the extension does when things change while it waits', () => {
     } finally {
       readings.dispose();
       fs.rmSync(path.dirname(file), { recursive: true, force: true });
+    }
+  });
+
+  test('the worker runs the newest of the requests that wait for the same, and cancels the older ones', async () => {
+    const thread = new StandInThread();
+    const worker = new EfxWorker(() => thread as unknown as Worker);
+    try {
+      const reading: EfxReading = { version: 2, kind: 'rules' };
+      const tokensOf = (text: string) => worker.run('semanticTokens', { text, reading }, 'a document');
+      const first = tokensOf('first');
+      const between = [tokensOf('second'), tokensOf('third')];
+      const newest = tokensOf('newest');
+      for (const older of between) {
+        await assert.rejects(older, vscode.CancellationError);
+      }
+      // The first one runs on, as it cannot be stopped, and its answer is given; the newest runs next.
+      thread.answer(new Uint32Array([1]));
+      assert.deepEqual(await first, new Uint32Array([1]));
+      thread.answer(new Uint32Array([4]));
+      assert.deepEqual(await newest, new Uint32Array([4]));
+      assert.deepEqual(thread.requests.map(({ params }) => params.text), ['first', 'newest']);
+      assert.equal(worker.runsOf('semanticTokens'), 2);
+    } finally {
+      worker.dispose();
+    }
+  });
+
+  test('the tokens of a version that an edit replaces while the worker reads them are dropped', async () => {
+    const text = 'WITH ND-Root DISPLAY a document edited while its tokens are read;\n';
+    const document = await vscode.workspace.openTextDocument({ language: 'efx', content: text });
+    try {
+      const readings = {
+        readingOf: () => Promise.resolve({ version: 2, kind: 'template' }),
+        knownReadingOf: () => ({ version: 2, kind: 'template' }),
+      } as unknown as EfxReadings;
+      const asked: Asked[] = [];
+      const tokens = new EfxSemanticTokens(readings, standInWorker(asked)).provideDocumentSemanticTokens(document, NOT_CANCELLED);
+      const [reading] = await askedAbout(asked, text, 1);
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(document.uri, new vscode.Position(0, 0), '// A change\n');
+      await vscode.workspace.applyEdit(edit);
+      reading.answer(new Uint32Array(0));
+      await assert.rejects(tokens, vscode.CancellationError);
+    } finally {
+      await closeDocument(document);
+    }
+  });
+
+  test('the tokens of a kind of file chosen away while the worker reads them are dropped', async () => {
+    const text = 'WITH ND-Root DISPLAY a document read as another kind meanwhile;\n';
+    const document = await vscode.workspace.openTextDocument({ language: 'efx', content: text });
+    const asked: Asked[] = [];
+    const worker = standInWorker(asked);
+    const readings = new EfxReadings(worker);
+    try {
+      readings.choose(document, 'rules');
+      const asRules = new EfxSemanticTokens(readings, worker).provideDocumentSemanticTokens(document, NOT_CANCELLED);
+      const [reading] = await askedAbout(asked, text, 1);
+      readings.choose(document, 'template');
+      reading.answer(new Uint32Array(0));
+      await assert.rejects(asRules, vscode.CancellationError);
+      assert.deepEqual(asked.filter(({ params }) => params.text === text).map(({ method, params }) => [method, params.reading]),
+        [['semanticTokens', { version: 2, kind: 'rules' }]]);
+    } finally {
+      readings.dispose();
+      await closeDocument(document);
     }
   });
 
