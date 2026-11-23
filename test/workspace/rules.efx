@@ -1,0 +1,3 @@
+// A rules file of EFX-2, which the tests open to check that the extension reads it as rules.
+--- STAGE 1a ---
+WITH ND-Root ASSERT BT-01-notice is present AS ERROR R-000-001 FOR BT-01-notice IN *;
