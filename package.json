@@ -2,7 +2,7 @@
   "name": "efx-vscode",
   "displayName": "EFX",
   "description": "Support for EFX, the expression and template language of the eForms SDK.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "op-ted",
   "author": {
     "name": "Publications Office of the European Union",
@@ -38,14 +38,210 @@
       {
         "id": "efx",
         "aliases": [
+          "EFX-2",
           "EFX"
         ],
         "extensions": [
           ".efx"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "efx1",
+        "aliases": [
+          "EFX-1"
+        ],
+        "configuration": "./language-configuration.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "efx.readAsTemplate",
+        "title": "Read as Template",
+        "category": "EFX"
+      },
+      {
+        "command": "efx.readAsRules",
+        "title": "Read as Rules",
+        "category": "EFX"
+      },
+      {
+        "command": "efx.chooseKind",
+        "title": "Choose Template or Rules",
+        "category": "EFX"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "efx.readAsTemplate",
+          "when": "editorLangId == efx"
+        },
+        {
+          "command": "efx.readAsRules",
+          "when": "editorLangId == efx"
+        },
+        {
+          "command": "efx.chooseKind",
+          "when": "false"
+        }
+      ]
+    },
+    "grammars": [
+      {
+        "language": "efx",
+        "scopeName": "source.efx2",
+        "path": "./dist/efx2.tmLanguage.json"
+      },
+      {
+        "language": "efx1",
+        "scopeName": "source.efx1",
+        "path": "./dist/efx1.tmLanguage.json"
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "efxWord",
+        "superType": "keyword",
+        "description": "A word of an EFX expression, or a word from a fixed list, such as and, present or rawValue."
+      },
+      {
+        "id": "efxLiteral",
+        "description": "An EFX literal that is neither a string nor a number, such as TRUE, a date or a duration."
+      },
+      {
+        "id": "efxAssetName",
+        "description": "The name of an asset in a label, of a codelist, a flag, a rule or a stage, in EFX."
+      },
+      {
+        "id": "efxText",
+        "description": "The text of an EFX template line."
+      },
+      {
+        "id": "efxPunctuation",
+        "description": "EFX punctuation, such as parentheses, commas and semicolons."
+      },
+      {
+        "id": "efxBracket",
+        "description": "The brackets of an EFX block: ${, #{, @{ and }."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "efx",
+        "scopes": {
+          "keyword": [
+            "keyword.control.efx"
+          ],
+          "efxWord": [
+            "keyword.other.efx"
+          ],
+          "type": [
+            "storage.type.efx"
+          ],
+          "function.defaultLibrary": [
+            "support.function.efx"
+          ],
+          "efxLiteral": [
+            "constant.language.efx"
+          ],
+          "string": [
+            "string.quoted.efx"
+          ],
+          "number": [
+            "constant.numeric.efx"
+          ],
+          "property": [
+            "variable.other.property.efx"
+          ],
+          "variable": [
+            "variable.other.efx"
+          ],
+          "function": [
+            "entity.name.function.efx"
+          ],
+          "efxAssetName": [
+            "constant.other.efx"
+          ],
+          "efxText": [
+            "meta.text.efx"
+          ],
+          "operator": [
+            "keyword.operator.efx"
+          ],
+          "efxPunctuation": [
+            "punctuation.separator.efx"
+          ],
+          "efxBracket": [
+            "punctuation.section.block.efx"
+          ],
+          "comment": [
+            "comment.line.double-slash.efx"
+          ]
+        }
+      },
+      {
+        "language": "efx1",
+        "scopes": {
+          "keyword": [
+            "keyword.control.efx"
+          ],
+          "efxWord": [
+            "keyword.other.efx"
+          ],
+          "type": [
+            "storage.type.efx"
+          ],
+          "function.defaultLibrary": [
+            "support.function.efx"
+          ],
+          "efxLiteral": [
+            "constant.language.efx"
+          ],
+          "string": [
+            "string.quoted.efx"
+          ],
+          "number": [
+            "constant.numeric.efx"
+          ],
+          "property": [
+            "variable.other.property.efx"
+          ],
+          "variable": [
+            "variable.other.efx"
+          ],
+          "function": [
+            "entity.name.function.efx"
+          ],
+          "efxAssetName": [
+            "constant.other.efx"
+          ],
+          "efxText": [
+            "meta.text.efx"
+          ],
+          "operator": [
+            "keyword.operator.efx"
+          ],
+          "efxPunctuation": [
+            "punctuation.separator.efx"
+          ],
+          "efxBracket": [
+            "punctuation.section.block.efx"
+          ],
+          "comment": [
+            "comment.line.double-slash.efx"
+          ]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[efx]": {
+        "editor.semanticHighlighting.enabled": true
+      },
+      "[efx1]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    }
   },
   "files": [
     "dist",
@@ -69,5 +265,8 @@
     "@vscode/vsce": "4.1.1",
     "esbuild": "0.28.2",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "@op-ted/efx-syntax-highlighter": "0.7.0"
   }
 }

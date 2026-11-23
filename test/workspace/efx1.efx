@@ -1,0 +1,3 @@
+// A view template of EFX-1, which the tests open to check that the extension reads it as EFX-1.
+1 {ND-Root} #{auxiliary|text|procedure} // Procedure
+	{BT-21-Procedure} #{field|name|BT-21-Procedure}: ${BT-21-Procedure}

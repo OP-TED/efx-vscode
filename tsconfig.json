@@ -1,4 +1,8 @@
 {
+  // tsc only checks the types: esbuild writes the code (scripts/build.mjs). The types of the EFX
+  // highlighter refer to those of CodeMirror, which are written for a browser; the extension uses
+  // none of them, so the declaration files of the packages are not checked (skipLibCheck), rather
+  // than give the extension the browser's types.
   "compilerOptions": {
     "target": "ES2024",
     "lib": ["ES2024"],
@@ -8,6 +12,7 @@
     "strict": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
     "noEmit": true
   },
   "include": ["src", "test"]

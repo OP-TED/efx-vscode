@@ -1,4 +1,5 @@
-// A view template, which the tests open to check that VS Code reads .efx files as EFX.
+// A view template of EFX-2, which the tests open to check how the extension reads and colours it.
+LET text:$title = 'Procedure';
 --- MAIN ---
 1 WITH ND-Root DISPLAY #{auxiliary|text|procedure}; // Procedure
-	WITH BT-21-Procedure DISPLAY #{field|name|BT-21-Procedure}: ${BT-21-Procedure};
+	WITH BT-21-Procedure DISPLAY #{field|name|BT-21-Procedure}: ${BT-21-Procedure} (${count(BT-21-Procedure) + 1});
